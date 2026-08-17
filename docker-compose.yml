@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  personal-cloud:
+    build: .
+    container_name: personal-cloud-app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - ADMIN_PASSWORD=admin123   # Change this to your preferred master password
+      - JWT_SECRET=change-this-jwt-secret-key-for-security-2026
+    volumes:
+      # Persistent storage on host machine
+      - ./storage:/app/storage
+      - ./data:/app/data

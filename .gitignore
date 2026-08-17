@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Environment Variables & Secrets
+.env
+
+# User Uploaded Data & Storage (Keep local / server only)
+storage/
+data/
+!data/.gitkeep
+!storage/.gitkeep
+
+# System & OS Files
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*

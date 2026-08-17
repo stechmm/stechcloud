@@ -1,0 +1,17 @@
+{
+  "name": "S-Tech Cloud",
+  "short_name": "S-Tech",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "description": "Fast & Secure Personal Cloud Storage for Phone, Tablet and PC",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512' fill='%233b82f6'><path d='M412 188c-6-76-70-136-156-136-68 0-126 38-147 98-63 8-109 63-109 130 0 73 59 132 132 132h280c66 0 120-54 120-120 0-58-41-106-96-118z'/></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
