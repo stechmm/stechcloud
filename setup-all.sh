@@ -8,6 +8,10 @@
 
 set -e
 
+# Force standard UTF-8 locale
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
 # ANSI Color Palette
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,6 +35,9 @@ fi
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$PROJECT_DIR"
+
+# Clean any existing broken .env file
+rm -f "$PROJECT_DIR/.env" "$PROJECT_DIR/agent/config.env"
 
 echo -e "${YELLOW}📝 Please enter your configuration settings below:${NC}"
 echo "----------------------------------------------------------------------"
@@ -63,10 +70,10 @@ echo "----------------------------------------------------------------------"
 echo -e "${GREEN}⏳ Starting All-in-One Installation...${NC}"
 echo "----------------------------------------------------------------------"
 
-# Step 1: Update System & Install Core Tools
+# Step 1: Update System & Install Core Tools (including modern Docker compose plugin)
 echo -e "${BLUE}📦 [1/6] Updating Ubuntu packages & installing dependencies...${NC}"
-apt update && apt upgrade -y
-apt install -y docker.io docker-compose python3 python3-pip python3-venv curl git ufw udev
+apt update
+apt install -y docker.io docker-compose-plugin docker-compose python3 python3-pip python3-venv curl git ufw udev
 
 systemctl enable --now docker
 
@@ -81,19 +88,25 @@ ufw allow 3000/tcp    # S-Tech Cloud
 ufw allow 51820/udp   # WireGuard VPN (if used)
 echo "y" | ufw enable || true
 
-# Step 3: Configure S-Tech Cloud
+# Step 3: Configure S-Tech Cloud Environment
 echo -e "${BLUE}☁️ [3/6] Setting up S-Tech Cloud Storage...${NC}"
-mkdir -p "$PROJECT_DIR/storage" "$PROJECT_DIR/data/trash"
+mkdir -p "$PROJECT_DIR/storage" "$PROJECT_DIR/data/trash" "$PROJECT_DIR/storage/Telegram_Uploads"
+
+JWT_SECRET=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
 
 cat <<EOF > "$PROJECT_DIR/.env"
 PORT=3000
 ADMIN_PASSWORD=$ADMIN_PASSWORD
-JWT_SECRET=$(openssl rand -hex 24)
+JWT_SECRET=$JWT_SECRET
 EOF
 
-# Build & Launch S-Tech Cloud Container
+# Build & Launch S-Tech Cloud Container (prefer Go-based 'docker compose')
 echo -e "${BLUE}🐳 [4/6] Launching S-Tech Cloud Docker Container...${NC}"
-docker-compose up -d --build
+if docker compose version >/dev/null 2>&1; then
+    docker compose up -d --build
+else
+    docker-compose up -d --build
+fi
 
 # Step 4: Setup S-Tech AI DevOps Agent
 echo -e "${BLUE}🤖 [5/6] Setting up AI DevOps & Cyber Defense Agent...${NC}"
