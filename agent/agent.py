@@ -244,6 +244,22 @@ def tool_change_password(target: str, new_password: str):
     
     return {"status": "error", "message": "Invalid target. Choose 'cloud' or 'vps'."}
 
+def tool_self_update():
+    """Pulls latest codebase from GitHub repository and restarts S-Tech AI Agent service."""
+    try:
+        git_res = run_cmd(f"cd {PROJECT_ROOT} && git fetch origin && git reset --hard origin/main && git pull origin main")
+        
+        # Check if pip requirements need update
+        req_path = os.path.join(PROJECT_ROOT, 'agent', 'requirements.txt')
+        if os.path.exists(req_path):
+            run_cmd(f"{sys.executable} -m pip install -r {req_path}")
+        
+        # Schedule restart in 2 seconds so message sends first
+        subprocess.Popen("sleep 2 && sudo systemctl restart stech-agent", shell=True)
+        return {"status": "success", "git_output": git_res, "message": "Successfully pulled latest updates from GitHub! Restarting Agent..."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 def tool_run_safe_command(command: str):
     """Runs safe Linux diagnostic commands."""
     forbidden = ["rm -rf", "mkfs", "dd if=", ":(){ :|:& };:", "chmod -R 777 /", "> /dev/sda", "shutdown"]
@@ -388,6 +404,9 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif "speed" in lowered or "လိုင်းမြန်" in user_text:
         await cmd_speedtest(update, context)
+        return
+    elif "update" in lowered or "upgrade" in lowered or "အဆင့်မြှင့်" in user_text:
+        await cmd_upgrade(update, context)
         return
 
     if not GEMINI_API_KEY:
@@ -600,6 +619,26 @@ async def cmd_passwd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"❌ <b>Error:</b> {res.get('message')}", parse_mode="HTML")
 
 @admin_only
+async def cmd_upgrade(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status_msg = await update.message.reply_text(
+        "🔄 <b>Self-Update Engine Initialized...</b>\n\n"
+        "• Fetching latest commits from GitHub...\n"
+        "• Checking dependencies...\n"
+        "• Applying updates and reloading Agent...",
+        parse_mode="HTML"
+    )
+    res = tool_self_update()
+    if res.get('status') == 'success':
+        await status_msg.edit_text(
+            f"✅ <b>Agent Upgraded Successfully!</b>\n\n"
+            f"📦 <b>Git Status:</b>\n<pre>{res.get('git_output', 'Updated')[:2000]}</pre>\n\n"
+            f"🔄 <i>The Agent service is restarting now and will reconnect in ~5 seconds!</i>",
+            parse_mode="HTML"
+        )
+    else:
+        await status_msg.edit_text(f"❌ <b>Update Failed:</b> {res.get('message')}", parse_mode="HTML")
+
+@admin_only
 async def cmd_reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args or context.args[0].lower() != "confirm":
         await update.message.reply_text("⚠️ <b>Warning:</b> This will reboot the entire VPS.\nTo proceed, type: <code>/reboot confirm</code>", parse_mode="HTML")
@@ -785,6 +824,8 @@ def main():
     app.add_handler(CommandHandler("speedtest", cmd_speedtest))
     app.add_handler(CommandHandler("passwd", cmd_passwd))
     app.add_handler(CommandHandler("password", cmd_passwd))
+    app.add_handler(CommandHandler("upgrade", cmd_upgrade))
+    app.add_handler(CommandHandler("update", cmd_upgrade))
     app.add_handler(CommandHandler("reboot", cmd_reboot))
 
     # Natural Language AI Brain Chat Handler
