@@ -215,6 +215,35 @@ def tool_deploy_app(app_type: str, app_name: str = "my-app"):
         return {"status": "deployed", "app": "Nginx", "port": 8081, "output": res}
     return {"error": f"Unsupported app_type: {app_type}. Supported: wordpress, nginx"}
 
+def tool_change_password(target: str, new_password: str):
+    """Changes password for 'cloud' (S-Tech Cloud) or 'vps' (Linux root)."""
+    target = target.lower().strip()
+    if not new_password or len(new_password) < 4:
+        return {"status": "error", "message": "Password must be at least 4 characters."}
+    
+    if target in ["cloud", "stechcloud", "storage"]:
+        env_path = os.path.join(PROJECT_ROOT, '.env')
+        if os.path.exists(env_path):
+            with open(env_path, 'r') as f:
+                content = f.read()
+            if 'ADMIN_PASSWORD=' in content:
+                content = re.sub(r'ADMIN_PASSWORD=.*', f'ADMIN_PASSWORD={new_password}', content)
+            else:
+                content += f"\nADMIN_PASSWORD={new_password}\n"
+            with open(env_path, 'w') as f:
+                f.write(content)
+            
+            # Restart container to apply new password
+            run_cmd("docker restart personal-cloud-app")
+            return {"status": "success", "target": "S-Tech Cloud", "message": "Cloud Master Password updated and container reloaded successfully!"}
+        return {"status": "error", "message": ".env file not found."}
+    
+    elif target in ["vps", "root", "server", "linux"]:
+        res = run_cmd(f'echo "root:{new_password}" | sudo chpasswd')
+        return {"status": "success", "target": "VPS Linux Root", "message": "VPS Root Password changed successfully!"}
+    
+    return {"status": "error", "message": "Invalid target. Choose 'cloud' or 'vps'."}
+
 def tool_run_safe_command(command: str):
     """Runs safe Linux diagnostic commands."""
     forbidden = ["rm -rf", "mkfs", "dd if=", ":(){ :|:& };:", "chmod -R 777 /", "> /dev/sda", "shutdown"]
@@ -543,6 +572,34 @@ async def cmd_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_daily_report(context.application)
 
 @admin_only
+async def cmd_passwd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "🔑 <b>Password Change Usage:</b>\n\n"
+            "• <b>Cloud Password ပြောင်းရန်:</b>\n<code>/passwd cloud &lt;new_password&gt;</code>\n\n"
+            "• <b>VPS Linux Root Password ပြောင်းရန်:</b>\n<code>/passwd vps &lt;new_password&gt;</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    target = context.args[0]
+    new_pwd = context.args[1]
+    
+    status_msg = await update.message.reply_text(f"⏳ Updating <b>{target}</b> password...", parse_mode="HTML")
+    res = tool_change_password(target, new_pwd)
+    
+    if res.get('status') == 'success':
+        await status_msg.edit_text(
+            f"✅ <b>Password Changed Successfully!</b>\n\n"
+            f"🎯 <b>Target:</b> {res.get('target')}\n"
+            f"🔐 <b>New Password:</b> <code>{new_pwd}</code>\n\n"
+            f"<i>Your new credentials are now active!</i>",
+            parse_mode="HTML"
+        )
+    else:
+        await status_msg.edit_text(f"❌ <b>Error:</b> {res.get('message')}", parse_mode="HTML")
+
+@admin_only
 async def cmd_reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args or context.args[0].lower() != "confirm":
         await update.message.reply_text("⚠️ <b>Warning:</b> This will reboot the entire VPS.\nTo proceed, type: <code>/reboot confirm</code>", parse_mode="HTML")
@@ -726,6 +783,8 @@ def main():
     app.add_handler(CommandHandler("clean", cmd_clean))
     app.add_handler(CommandHandler("backup", cmd_backup))
     app.add_handler(CommandHandler("speedtest", cmd_speedtest))
+    app.add_handler(CommandHandler("passwd", cmd_passwd))
+    app.add_handler(CommandHandler("password", cmd_passwd))
     app.add_handler(CommandHandler("reboot", cmd_reboot))
 
     # Natural Language AI Brain Chat Handler
