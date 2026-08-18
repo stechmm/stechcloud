@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
 """
-S-Tech VPS Server Maintenance & Cyber Defense AI Assistant (v4.0 - Ultra Edition)
+S-Tech VPS Server Maintenance & Cyber Defense AI Assistant (v4.1 - Ultra Edition)
 Author: Antigravity
-Features:
-- Google Gemini AI Brain with Function Calling & Burmese Natural Language
-- Telegram-to-Cloud Direct File Upload (Photos, Videos, Docs saved to S-Tech Cloud)
-- Telegram Backup Delivery (Sends .tar.gz database/cloud backup directly to Telegram)
-- 1-Click Docker App Deployer (WordPress, Nginx, etc.)
-- 24/7 Container Auto-Healing & Crash Recovery
-- SSH Password Brute-Force Auto-Ban & DDoS Traffic Spike Shield
-- 08:00 AM Daily Morning Health & Security Briefing
 """
 
 import os
@@ -46,7 +38,7 @@ CPU_THRESHOLD = float(os.getenv('CPU_THRESHOLD', '85'))
 RAM_THRESHOLD = float(os.getenv('RAM_THRESHOLD', '85'))
 DISK_THRESHOLD = float(os.getenv('DISK_THRESHOLD', '90'))
 CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', '180'))
-MONITORED_CONTAINERS = [c.strip() for c in os.getenv('MONITORED_CONTAINERS', 'personal-cloud-app,shadowbox,pos-server').split(',') if c.strip()]
+MONITORED_CONTAINERS = [c.strip() for c in os.getenv('MONITORED_CONTAINERS', 'personal-cloud-app').split(',') if c.strip()]
 AUTO_RESTART = os.getenv('AUTO_RESTART', 'True').lower() in ('true', '1', 'yes')
 
 SSH_MAX_FAILED_ATTEMPTS = int(os.getenv('SSH_MAX_FAILED_ATTEMPTS', '4'))
@@ -231,7 +223,7 @@ def tool_run_safe_command(command: str):
     out = run_cmd(command, timeout=25)
     return {"command": command, "output": out}
 
-# Initialize Gemini AI Model
+# Initialize Gemini AI Model with smart model fallback
 ai_model = None
 if GEMINI_AVAILABLE and GEMINI_API_KEY:
     try:
@@ -258,12 +250,19 @@ if GEMINI_AVAILABLE and GEMINI_API_KEY:
             "5. Always protect the server and never execute destructive wipe commands."
         )
 
-        ai_model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
-            tools=tools_list,
-            system_instruction=system_instruction
-        )
-        logger.info("Gemini AI Brain initialized successfully.")
+        candidate_models = ["gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+        for m_name in candidate_models:
+            try:
+                ai_model = genai.GenerativeModel(
+                    model_name=m_name,
+                    tools=tools_list,
+                    system_instruction=system_instruction
+                )
+                logger.info(f"Gemini AI Brain successfully loaded model: {m_name}")
+                break
+            except Exception as me:
+                logger.warning(f"Model {m_name} failed, trying next: {me}")
+
     except Exception as e:
         logger.error(f"Failed to initialize Gemini AI: {e}")
 
@@ -327,15 +326,21 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reply_text)
     except Exception as e:
         logger.error(f"AI chat error: {e}")
-        await update.message.reply_text(f"⚠️ <b>AI Processing Error:</b> {str(e)}", parse_mode="HTML")
+        # Fallback query attempt
+        try:
+            fallback_model = genai.GenerativeModel("gemini-1.5-flash")
+            response = await asyncio.to_thread(fallback_model.generate_content, f"Answer in Burmese: {user_text}")
+            await update.message.reply_text(response.text)
+        except Exception as e2:
+            await update.message.reply_text(f"⚠️ <b>AI Processing Error:</b> {str(e)}\n\nYou can use manual commands: /status, /clean, /restart.", parse_mode="HTML")
 
 # --- Bot Command Handlers ---
 
 @admin_only
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🤖 <b>Welcome to S-Tech AI DevOps & Cyber Defense Assistant (v4.0 Ultra)</b>\n\n"
-        "💬 <b>Natural AI Chat:</b> Chat with me in Burmese anytime! (e.g. <i>'ဆာဗာ အခြေအနေ ဘယ်လိုလဲ'</i>, <i>'RAM ရှင်းပေး'</i>, <i>'WordPress တင်ပေးပါ'</i>)\n\n"
+        "🤖 <b>Welcome to S-Tech AI DevOps & Cyber Defense Assistant (v4.1)</b>\n\n"
+        "💬 <b>Natural AI Chat:</b> Chat with me in Burmese anytime! (e.g. <i>'ဆာဗာ အခြေအနေ ဘယ်လိုလဲ'</i>, <i>'RAM ရှင်းပေး'</i>)\n\n"
         "📤 <b>Cloud File Upload:</b> Send any photo/video/doc here to save directly into S-Tech Cloud!\n\n"
         "<b>Direct Commands:</b>\n"
         "📊 /status - System metrics (CPU, RAM, Disk, Uptime)\n"
@@ -386,7 +391,6 @@ async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await status_msg.edit_text(f"✅ Backup created ({res['size']})! Sending to Telegram...")
         
-        # Telegram bot limit is 50MB for sending files
         if file_size < 48 * 1024 * 1024 and os.path.exists(file_path):
             with open(file_path, 'rb') as f:
                 await update.message.reply_document(
@@ -606,11 +610,15 @@ async def monitor_loop(app: Application):
             else:
                 alert_state['disk_alerted'] = False
 
-            # 6. Container Check & Auto-Restart
+            # 6. Check actually running Monitored Containers & Auto-Restart
             containers = get_docker_containers()
+            existing_container_names = [c['name'] for c in containers]
             container_dict = {c['name']: c for c in containers}
 
             for target_name in MONITORED_CONTAINERS:
+                if target_name not in existing_container_names:
+                    continue  # Do not alert for containers that are not installed on this VPS yet
+
                 c = container_dict.get(target_name)
                 if not c or c['state'] != 'running':
                     if target_name not in alert_state['containers_down']:
@@ -643,7 +651,7 @@ def main():
         print("❌ ERROR: TELEGRAM_BOT_TOKEN is not set in config.env")
         sys.exit(1)
 
-    print("🚀 Starting S-Tech AI DevOps & Cyber Defense Assistant (v4.0 Ultra)...")
+    print("🚀 Starting S-Tech AI DevOps & Cyber Defense Assistant (v4.1)...")
     app = Application.builder().token(BOT_TOKEN).build()
 
     # Direct File Upload Handlers (Photo, Video, Audio, Document -> S-Tech Cloud)
@@ -675,7 +683,7 @@ def main():
                 brain_status = "🧠 Gemini AI Brain: ACTIVATED" if ai_model else "⚙️ Command Mode Active (Add GEMINI_API_KEY for Natural Chat)"
                 await application.bot.send_message(
                     chat_id=ADMIN_CHAT_ID,
-                    text=f"🤖 <b>S-Tech AI DevOps Assistant (v4.0 Ultra) is ONLINE!</b>\n{brain_status}\n\n• Type /status to inspect VPS\n• Send any file/photo to save to Cloud\n• Send any message to chat in Burmese.",
+                    text=f"🤖 <b>S-Tech AI DevOps Assistant (v4.1) is ONLINE!</b>\n{brain_status}\n\n• Type /status to inspect VPS\n• Send any file/photo to save to Cloud\n• Send any message to chat in Burmese.",
                     parse_mode="HTML"
                 )
             except Exception as e:
