@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """
-S-Tech VPS Server Maintenance & Cyber Defense AI Assistant (v3.0 - Full AI Brain Edition)
+S-Tech VPS Server Maintenance & Cyber Defense AI Assistant (v4.0 - Ultra Edition)
 Author: Antigravity
-Description: Powered by Google Gemini AI Brain with Function Calling, Cyber Intrusion Detection,
-DDoS Spike Alerts, 24/7 Auto-Healing, and Natural Language Burmese/English Telegram Chat Assistant.
+Features:
+- Google Gemini AI Brain with Function Calling & Burmese Natural Language
+- Telegram-to-Cloud Direct File Upload (Photos, Videos, Docs saved to S-Tech Cloud)
+- Telegram Backup Delivery (Sends .tar.gz database/cloud backup directly to Telegram)
+- 1-Click Docker App Deployer (WordPress, Nginx, etc.)
+- 24/7 Container Auto-Healing & Crash Recovery
+- SSH Password Brute-Force Auto-Ban & DDoS Traffic Spike Shield
+- 08:00 AM Daily Morning Health & Security Briefing
 """
 
 import os
@@ -23,7 +29,6 @@ from telegram.ext import (
     ContextTypes, filters
 )
 
-# Optional Gemini AI import
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
@@ -40,19 +45,24 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY', '')
 CPU_THRESHOLD = float(os.getenv('CPU_THRESHOLD', '85'))
 RAM_THRESHOLD = float(os.getenv('RAM_THRESHOLD', '85'))
 DISK_THRESHOLD = float(os.getenv('DISK_THRESHOLD', '90'))
-CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', '180')) # 3 mins
+CHECK_INTERVAL = int(os.getenv('CHECK_INTERVAL', '180'))
 MONITORED_CONTAINERS = [c.strip() for c in os.getenv('MONITORED_CONTAINERS', 'personal-cloud-app,shadowbox,pos-server').split(',') if c.strip()]
 AUTO_RESTART = os.getenv('AUTO_RESTART', 'True').lower() in ('true', '1', 'yes')
 
 SSH_MAX_FAILED_ATTEMPTS = int(os.getenv('SSH_MAX_FAILED_ATTEMPTS', '4'))
 DDOS_CONN_THRESHOLD = int(os.getenv('DDOS_CONN_THRESHOLD', '800'))
 
+# Base Storage Directory for Telegram Uploads
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+STORAGE_DIR = os.path.join(PROJECT_ROOT, 'storage', 'Telegram_Uploads')
+os.makedirs(STORAGE_DIR, exist_ok=True)
+
 # Configure Logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger('STechAIBrain')
+logger = logging.getLogger('STechUltraAgent')
 
 # Internal State Tracking
 alert_state = {
@@ -82,7 +92,7 @@ def get_uptime():
     minutes, _ = divmod(remainder, 60)
     return f"{days}d {hours}h {minutes}m"
 
-def run_cmd(cmd, timeout=30):
+def run_cmd(cmd, timeout=35):
     try:
         res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         return res.stdout.strip() or res.stderr.strip()
@@ -124,7 +134,7 @@ def admin_only(func):
         return await func(update, context)
     return wrapper
 
-# --- AI Tool Definitions (Callable by Gemini AI Brain) ---
+# --- AI Tools for Gemini Brain ---
 def tool_get_system_metrics():
     """Returns real-time CPU, RAM, Swap, Disk, Uptime, IP and network load."""
     cpu_percent = psutil.cpu_percent(interval=0.5)
@@ -173,9 +183,10 @@ def tool_backup_data():
     os.makedirs(backup_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_path = f"{backup_dir}/backup_{ts}.tar.gz"
-    res = run_cmd(f"tar -czf {file_path} /root/personal-cloud/data /root/personal-cloud/storage 2>/dev/null || tar -czf {file_path} /root/stechcloud 2>/dev/null")
+    res = run_cmd(f"tar -czf {file_path} {PROJECT_ROOT}/data {PROJECT_ROOT}/storage 2>/dev/null || tar -czf {file_path} /root/stechcloud 2>/dev/null")
     if os.path.exists(file_path):
-        return {"status": "success", "file": file_path, "size": format_bytes(os.path.getsize(file_path))}
+        size = os.path.getsize(file_path)
+        return {"status": "success", "file": file_path, "size": format_bytes(size), "bytes": size}
     return {"status": "failed", "error": res}
 
 def tool_manage_firewall(action: str, ip: str = ""):
@@ -198,14 +209,25 @@ def tool_run_speedtest():
     res = run_cmd("curl -s https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py | python3 - --simple 2>/dev/null", timeout=40)
     return {"speedtest_output": res or "Speedtest completed"}
 
+def tool_deploy_app(app_type: str, app_name: str = "my-app"):
+    """Deploys common docker apps like 'wordpress', 'nginx', 'redis'."""
+    app_type = app_type.lower().strip()
+    if app_type == "wordpress":
+        cmd = f"docker run -d --name {app_name} -p 8080:80 -e WORDPRESS_DB_PASSWORD=secret wordpress:latest"
+        res = run_cmd(cmd)
+        return {"status": "deployed", "app": "WordPress", "port": 8080, "output": res}
+    elif app_type == "nginx":
+        cmd = f"docker run -d --name {app_name} -p 8081:80 nginx:alpine"
+        res = run_cmd(cmd)
+        return {"status": "deployed", "app": "Nginx", "port": 8081, "output": res}
+    return {"error": f"Unsupported app_type: {app_type}. Supported: wordpress, nginx"}
+
 def tool_run_safe_command(command: str):
-    """Runs safe Linux diagnostic commands (e.g. df -h, free -m, top -b -n 1, netstat, etc.)."""
-    # Guardrails against destructive commands
+    """Runs safe Linux diagnostic commands."""
     forbidden = ["rm -rf", "mkfs", "dd if=", ":(){ :|:& };:", "chmod -R 777 /", "> /dev/sda", "shutdown"]
     for f in forbidden:
         if f in command.lower():
-            return {"error": f"Security Block: Command '{command}' is prohibited by safety policy."}
-    
+            return {"error": f"Security Block: Command '{command}' is prohibited."}
     out = run_cmd(command, timeout=25)
     return {"command": command, "output": out}
 
@@ -221,12 +243,13 @@ if GEMINI_AVAILABLE and GEMINI_API_KEY:
             tool_backup_data,
             tool_manage_firewall,
             tool_run_speedtest,
+            tool_deploy_app,
             tool_run_safe_command
         ]
         
         system_instruction = (
             "You are S-Tech AI DevOps Engineer & Assistant - an intelligent, helpful, and highly capable server administrator AI for the owner's DigitalOcean VPS.\n"
-            "You have direct access to tools to inspect CPU/RAM/Disk, restart containers, clean cache, backup files, and run safe commands.\n"
+            "You have direct access to tools to inspect CPU/RAM/Disk, restart containers, clean cache, backup files, deploy apps, and run safe commands.\n"
             "Rules:\n"
             "1. When the user asks anything about server health, status, or issues, ALWAYS use your tools first to get real data.\n"
             "2. Answer in natural, polite, and fluent Burmese (မြန်မာဘာသာ) unless the user asks in English.\n"
@@ -244,6 +267,41 @@ if GEMINI_AVAILABLE and GEMINI_API_KEY:
     except Exception as e:
         logger.error(f"Failed to initialize Gemini AI: {e}")
 
+# --- Direct Telegram File Upload to Cloud Handler ---
+@admin_only
+async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    file_obj = None
+    original_name = ""
+
+    if msg.photo:
+        file_obj = await msg.photo[-1].get_file()
+        original_name = f"photo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+    elif msg.video:
+        file_obj = await msg.video.get_file()
+        original_name = msg.video.file_name or f"video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+    elif msg.audio:
+        file_obj = await msg.audio.get_file()
+        original_name = msg.audio.file_name or f"audio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp3"
+    elif msg.document:
+        file_obj = await msg.document.get_file()
+        original_name = msg.document.file_name or f"doc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.bin"
+
+    if file_obj and original_name:
+        status_msg = await msg.reply_text(f"⏳ <b>Uploading to S-Tech Cloud:</b> <code>{original_name}</code>...", parse_mode="HTML")
+        dest_path = os.path.join(STORAGE_DIR, original_name)
+        
+        await file_obj.download_to_drive(dest_path)
+        file_size = os.path.getsize(dest_path)
+
+        await status_msg.edit_text(
+            f"✅ <b>Saved to S-Tech Cloud!</b>\n\n"
+            f"📁 <b>Folder:</b> <code>Telegram_Uploads/{original_name}</code>\n"
+            f"📦 <b>Size:</b> {format_bytes(file_size)}\n\n"
+            f"🌐 <i>You can now access, stream, or download this file from your S-Tech Cloud app!</i>",
+            parse_mode="HTML"
+        )
+
 # --- Natural Language Message Handler (AI Brain Chat) ---
 @admin_only
 async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -251,43 +309,41 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_text:
         return
 
-    # If Gemini is not configured, give a helpful prompt
     if not ai_model:
         await update.message.reply_text(
-            "ℹ️ <b>AI Brain is not yet configured with Gemini API Key.</b>\n\n"
-            "Please add your free <code>GEMINI_API_KEY</code> in <code>config.env</code> to chat in natural Burmese.\n"
-            "In the meantime, you can use commands like /status, /containers, /clean, /backup, /security.",
+            "ℹ️ <b>AI Brain is in Standard Command Mode.</b>\n"
+            "Add your free <code>GEMINI_API_KEY</code> in <code>config.env</code> to chat in natural Burmese.\n"
+            "Try: /status, /containers, /clean, /backup, /security.",
             parse_mode="HTML"
         )
         return
 
-    # Send typing action
     await update.message.chat.send_action("typing")
 
     try:
-        # Start chat with automatic function calling enabled
         chat = ai_model.start_chat(enable_automatic_function_calling=True)
         response = await asyncio.to_thread(chat.send_message, user_text)
         reply_text = response.text or "အဆင်ပြေစွာ ဆောင်ရွက်ပြီးစီးပါပြီခင်ဗျာ။"
         await update.message.reply_text(reply_text)
     except Exception as e:
         logger.error(f"AI chat error: {e}")
-        await update.message.reply_text(f"⚠️ <b>AI Processing Error:</b> {str(e)}\n\nYou can still use manual commands: /status, /clean, /restart.", parse_mode="HTML")
+        await update.message.reply_text(f"⚠️ <b>AI Processing Error:</b> {str(e)}", parse_mode="HTML")
 
 # --- Bot Command Handlers ---
 
 @admin_only
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🤖 <b>Welcome to S-Tech AI DevOps & Cyber Defense Assistant (v3.0)</b>\n\n"
-        "💬 <b>Natural AI Chat:</b> You can talk to me directly in Burmese or English! (e.g. <i>'ဆာဗာ အခြေအနေ ဘယ်လိုလဲ'</i> or <i>'RAM တွေရှင်းပေးပါ'</i>)\n\n"
+        "🤖 <b>Welcome to S-Tech AI DevOps & Cyber Defense Assistant (v4.0 Ultra)</b>\n\n"
+        "💬 <b>Natural AI Chat:</b> Chat with me in Burmese anytime! (e.g. <i>'ဆာဗာ အခြေအနေ ဘယ်လိုလဲ'</i>, <i>'RAM ရှင်းပေး'</i>, <i>'WordPress တင်ပေးပါ'</i>)\n\n"
+        "📤 <b>Cloud File Upload:</b> Send any photo/video/doc here to save directly into S-Tech Cloud!\n\n"
         "<b>Direct Commands:</b>\n"
         "📊 /status - System metrics (CPU, RAM, Disk, Uptime)\n"
         "📦 /containers - Docker containers status\n"
         "🔄 /restart &lt;name&gt; - Restart a Docker container\n"
         "📜 /logs &lt;name&gt; - View container logs\n"
         "🧹 /clean - Clean unused cache & docker logs\n"
-        "💾 /backup - Instant data archive backup\n"
+        "💾 /backup - Backup Cloud & deliver file to Telegram\n"
         "🛡️ /security - Security audit & blocked attackers\n"
         "🚀 /speedtest - Test VPS network speed\n"
         "📋 /report - Instant Full Health Report\n"
@@ -318,6 +374,31 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ <i>Status: Optimal & Protected</i>"
     )
     await update.message.reply_text(msg, parse_mode="HTML")
+
+@admin_only
+async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status_msg = await update.message.reply_text("💾 Creating backup archive of S-Tech Cloud data...")
+    res = tool_backup_data()
+    
+    if res.get('status') == 'success':
+        file_path = res['file']
+        file_size = res.get('bytes', 0)
+        
+        await status_msg.edit_text(f"✅ Backup created ({res['size']})! Sending to Telegram...")
+        
+        # Telegram bot limit is 50MB for sending files
+        if file_size < 48 * 1024 * 1024 and os.path.exists(file_path):
+            with open(file_path, 'rb') as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename=os.path.basename(file_path),
+                    caption=f"📦 <b>S-Tech Cloud Backup Archive</b>\nSize: {res['size']}",
+                    parse_mode="HTML"
+                )
+        else:
+            await update.message.reply_text(f"📁 Backup saved locally at <code>{file_path}</code> (Size: {res['size']}).", parse_mode="HTML")
+    else:
+        await status_msg.edit_text(f"❌ Backup failed: {res.get('error')}")
 
 @admin_only
 async def cmd_security(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -391,15 +472,6 @@ async def cmd_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🧹 Cleaning up unused Docker images and cache...")
     res = tool_clean_cache()
     await update.message.reply_text(f"✅ <b>Cleanup Complete!</b>\n💽 Current Disk: {res.get('disk_after')}", parse_mode="HTML")
-
-@admin_only
-async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💾 Creating backup archive...")
-    res = tool_backup_data()
-    if res.get('status') == 'success':
-        await update.message.reply_text(f"✅ <b>Backup Created!</b>\n📁 File: <code>{res['file']}</code>\n📦 Size: {res['size']}", parse_mode="HTML")
-    else:
-        await update.message.reply_text(f"❌ Backup failed: {res.get('error')}")
 
 @admin_only
 async def cmd_speedtest(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -571,10 +643,13 @@ def main():
         print("❌ ERROR: TELEGRAM_BOT_TOKEN is not set in config.env")
         sys.exit(1)
 
-    print("🚀 Starting S-Tech AI DevOps & Cyber Defense Assistant (v3.0)...")
+    print("🚀 Starting S-Tech AI DevOps & Cyber Defense Assistant (v4.0 Ultra)...")
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Register Command Handlers
+    # Direct File Upload Handlers (Photo, Video, Audio, Document -> S-Tech Cloud)
+    app.add_handler(MessageHandler(filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.Document.ALL, handle_file_upload))
+
+    # Command Handlers
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_start))
     app.add_handler(CommandHandler("status", cmd_status))
@@ -600,7 +675,7 @@ def main():
                 brain_status = "🧠 Gemini AI Brain: ACTIVATED" if ai_model else "⚙️ Command Mode Active (Add GEMINI_API_KEY for Natural Chat)"
                 await application.bot.send_message(
                     chat_id=ADMIN_CHAT_ID,
-                    text=f"🤖 <b>S-Tech AI DevOps Assistant is ONLINE!</b>\n{brain_status}\n\nType /status or send any message to chat.",
+                    text=f"🤖 <b>S-Tech AI DevOps Assistant (v4.0 Ultra) is ONLINE!</b>\n{brain_status}\n\n• Type /status to inspect VPS\n• Send any file/photo to save to Cloud\n• Send any message to chat in Burmese.",
                     parse_mode="HTML"
                 )
             except Exception as e:
