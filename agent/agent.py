@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-S-Tech VPS Server Maintenance & Cyber Defense AI Assistant (v4.1 - Ultra Edition)
+S-Tech VPS Server Maintenance & Cyber Defense AI Assistant (v4.2 - Dynamic Model Resolution)
 Author: Antigravity
 """
 
@@ -12,6 +12,7 @@ import subprocess
 import logging
 import re
 import json
+import requests
 from datetime import datetime
 import psutil
 from dotenv import load_dotenv
@@ -223,48 +224,88 @@ def tool_run_safe_command(command: str):
     out = run_cmd(command, timeout=25)
     return {"command": command, "output": out}
 
-# Initialize Gemini AI Model with smart model fallback
-ai_model = None
+# Dynamic Gemini AI Auto-Discovery & Initialization
+active_model_name = None
 if GEMINI_AVAILABLE and GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        tools_list = [
-            tool_get_system_metrics,
-            tool_manage_docker,
-            tool_clean_cache,
-            tool_backup_data,
-            tool_manage_firewall,
-            tool_run_speedtest,
-            tool_deploy_app,
-            tool_run_safe_command
-        ]
         
-        system_instruction = (
-            "You are S-Tech AI DevOps Engineer & Assistant - an intelligent, helpful, and highly capable server administrator AI for the owner's DigitalOcean VPS.\n"
-            "You have direct access to tools to inspect CPU/RAM/Disk, restart containers, clean cache, backup files, deploy apps, and run safe commands.\n"
-            "Rules:\n"
-            "1. When the user asks anything about server health, status, or issues, ALWAYS use your tools first to get real data.\n"
-            "2. Answer in natural, polite, and fluent Burmese (မြန်မာဘာသာ) unless the user asks in English.\n"
-            "3. Format your answers cleanly with emojis, bullet points, and code blocks for readability on Telegram.\n"
-            "4. Be proactive: If RAM or Disk is high, explain why and offer to clean cache.\n"
-            "5. Always protect the server and never execute destructive wipe commands."
-        )
+        # Discover all available models in the API key
+        try:
+            available_models = [m.name for m in genai.list_models() if 'generateContent' in getattr(m, 'supported_generation_methods', [])]
+            logger.info(f"Discovered Gemini models: {available_models}")
+            
+            # Prefer flash or pro models
+            for target in ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-pro']:
+                for m in available_models:
+                    if target in m:
+                        active_model_name = m.replace('models/', '')
+                        break
+                if active_model_name:
+                    break
+        except Exception as le:
+            logger.warning(f"Could not list models dynamically: {le}")
 
-        candidate_models = ["gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
-        for m_name in candidate_models:
-            try:
-                ai_model = genai.GenerativeModel(
-                    model_name=m_name,
-                    tools=tools_list,
-                    system_instruction=system_instruction
-                )
-                logger.info(f"Gemini AI Brain successfully loaded model: {m_name}")
-                break
-            except Exception as me:
-                logger.warning(f"Model {m_name} failed, trying next: {me}")
+        if not active_model_name:
+            active_model_name = "gemini-1.5-flash"
+
+        logger.info(f"Using Gemini model: {active_model_name}")
 
     except Exception as e:
         logger.error(f"Failed to initialize Gemini AI: {e}")
+
+# Direct REST & SDK AI query helper
+def ask_gemini(user_text: str) -> str:
+    """Queries Gemini AI with full system context and real-time server metrics."""
+    metrics = tool_get_system_metrics()
+    containers = get_docker_containers()
+    blocked_count = len(alert_state['blocked_ips_today'])
+
+    context_prompt = (
+        "You are S-Tech AI DevOps Engineer & Assistant - an intelligent server administrator for the owner's DigitalOcean VPS.\n"
+        "Here is the LIVE real-time server state:\n"
+        f"- IP Address: {metrics['ip_address']}\n"
+        f"- Uptime: {metrics['uptime']}\n"
+        f"- CPU Usage: {metrics['cpu_percent']}%\n"
+        f"- RAM: {metrics['ram_percent']}% used ({metrics['ram_used']} / {metrics['ram_total']})\n"
+        f"- Disk Storage: {metrics['disk_percent']}% used ({metrics['disk_used']} / {metrics['disk_free']} free)\n"
+        f"- Active Connections: {metrics['active_connections']}\n"
+        f"- Docker Containers: {json.dumps(containers)}\n"
+        f"- Blocked Hacker IPs Today: {blocked_count}\n\n"
+        "Rules:\n"
+        "1. Respond in natural, polite, and fluent Burmese (မြန်မာဘာသာ) with helpful formatting and emojis.\n"
+        "2. Directly answer the user's question using the live data above.\n"
+        "3. If the user asks you to clean cache, restart containers, or backup, explain that you can perform it and recommend the action.\n\n"
+        f"User Question: {user_text}"
+    )
+
+    # Strategy 1: Use direct Google REST API (fastest & 100% reliable)
+    for model_candidate in [active_model_name, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]:
+        if not model_candidate:
+            continue
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_candidate}:generateContent?key={GEMINI_API_KEY}"
+            payload = {
+                "contents": [{"parts": [{"text": context_prompt}]}],
+                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 1000}
+            }
+            resp = requests.post(url, json=payload, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                text = data['candidates'][0]['content']['parts'][0]['text']
+                return text.strip()
+            else:
+                logger.warning(f"REST API error with {model_candidate}: {resp.status_code} {resp.text}")
+        except Exception as ex:
+            logger.warning(f"Error calling {model_candidate}: {ex}")
+
+    # Strategy 2: Python SDK fallback
+    try:
+        model = genai.GenerativeModel(active_model_name or "gemini-1.5-flash")
+        response = model.generate_content(context_prompt)
+        return response.text.strip()
+    except Exception as e:
+        raise e
 
 # --- Direct Telegram File Upload to Cloud Handler ---
 @admin_only
@@ -308,7 +349,19 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_text:
         return
 
-    if not ai_model:
+    # Check for direct action intents
+    lowered = user_text.lower()
+    if "အမှိုက်" in user_text or "clean" in lowered or "ရှင်း" in user_text:
+        await cmd_clean(update, context)
+        return
+    elif "backup" in lowered or "ဘက်ကပ်" in user_text:
+        await cmd_backup(update, context)
+        return
+    elif "speed" in lowered or "လိုင်းမြန်" in user_text:
+        await cmd_speedtest(update, context)
+        return
+
+    if not GEMINI_API_KEY:
         await update.message.reply_text(
             "ℹ️ <b>AI Brain is in Standard Command Mode.</b>\n"
             "Add your free <code>GEMINI_API_KEY</code> in <code>config.env</code> to chat in natural Burmese.\n"
@@ -320,26 +373,28 @@ async def handle_ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action("typing")
 
     try:
-        chat = ai_model.start_chat(enable_automatic_function_calling=True)
-        response = await asyncio.to_thread(chat.send_message, user_text)
-        reply_text = response.text or "အဆင်ပြေစွာ ဆောင်ရွက်ပြီးစီးပါပြီခင်ဗျာ။"
-        await update.message.reply_text(reply_text)
+        reply_text = await asyncio.to_thread(ask_gemini, user_text)
+        await update.message.reply_text(reply_text or "အဆင်ပြေစွာ ဆောင်ရွက်ပြီးစီးပါပြီခင်ဗျာ။")
     except Exception as e:
         logger.error(f"AI chat error: {e}")
-        # Fallback query attempt
-        try:
-            fallback_model = genai.GenerativeModel("gemini-1.5-flash")
-            response = await asyncio.to_thread(fallback_model.generate_content, f"Answer in Burmese: {user_text}")
-            await update.message.reply_text(response.text)
-        except Exception as e2:
-            await update.message.reply_text(f"⚠️ <b>AI Processing Error:</b> {str(e)}\n\nYou can use manual commands: /status, /clean, /restart.", parse_mode="HTML")
+        # Graceful fallback: return system status report
+        m = tool_get_system_metrics()
+        fallback_msg = (
+            f"🖥️ <b>S-Tech Server အခြေအနေ အကျဉ်းချုပ်:</b>\n\n"
+            f"⚙️ <b>CPU:</b> {m['cpu_percent']}%\n"
+            f"🧠 <b>RAM:</b> {m['ram_percent']}% ({m['ram_used']} / {m['ram_total']})\n"
+            f"💾 <b>Storage:</b> {m['disk_percent']}% ({m['disk_used']} used / {m['disk_free']} free)\n"
+            f"⏱️ <b>Uptime:</b> {m['uptime']}\n\n"
+            f"အသေးစိတ်ကြည့်ရန် /status သို့မဟုတ် /security ကို အသုံးပြုနိုင်ပါသည်ခင်ဗျာ။"
+        )
+        await update.message.reply_text(fallback_msg, parse_mode="HTML")
 
 # --- Bot Command Handlers ---
 
 @admin_only
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "🤖 <b>Welcome to S-Tech AI DevOps & Cyber Defense Assistant (v4.1)</b>\n\n"
+        "🤖 <b>Welcome to S-Tech AI DevOps & Cyber Defense Assistant (v4.2)</b>\n\n"
         "💬 <b>Natural AI Chat:</b> Chat with me in Burmese anytime! (e.g. <i>'ဆာဗာ အခြေအနေ ဘယ်လိုလဲ'</i>, <i>'RAM ရှင်းပေး'</i>)\n\n"
         "📤 <b>Cloud File Upload:</b> Send any photo/video/doc here to save directly into S-Tech Cloud!\n\n"
         "<b>Direct Commands:</b>\n"
@@ -617,7 +672,7 @@ async def monitor_loop(app: Application):
 
             for target_name in MONITORED_CONTAINERS:
                 if target_name not in existing_container_names:
-                    continue  # Do not alert for containers that are not installed on this VPS yet
+                    continue
 
                 c = container_dict.get(target_name)
                 if not c or c['state'] != 'running':
@@ -651,7 +706,7 @@ def main():
         print("❌ ERROR: TELEGRAM_BOT_TOKEN is not set in config.env")
         sys.exit(1)
 
-    print("🚀 Starting S-Tech AI DevOps & Cyber Defense Assistant (v4.1)...")
+    print("🚀 Starting S-Tech AI DevOps & Cyber Defense Assistant (v4.2)...")
     app = Application.builder().token(BOT_TOKEN).build()
 
     # Direct File Upload Handlers (Photo, Video, Audio, Document -> S-Tech Cloud)
@@ -680,10 +735,10 @@ def main():
         asyncio.create_task(monitor_loop(application))
         if ADMIN_CHAT_ID:
             try:
-                brain_status = "🧠 Gemini AI Brain: ACTIVATED" if ai_model else "⚙️ Command Mode Active (Add GEMINI_API_KEY for Natural Chat)"
+                brain_status = f"🧠 Gemini AI Brain: ACTIVATED ({active_model_name})" if active_model_name else "⚙️ Command Mode Active"
                 await application.bot.send_message(
                     chat_id=ADMIN_CHAT_ID,
-                    text=f"🤖 <b>S-Tech AI DevOps Assistant (v4.1) is ONLINE!</b>\n{brain_status}\n\n• Type /status to inspect VPS\n• Send any file/photo to save to Cloud\n• Send any message to chat in Burmese.",
+                    text=f"🤖 <b>S-Tech AI DevOps Assistant (v4.2) is ONLINE!</b>\n{brain_status}\n\n• Type /status to inspect VPS\n• Send any file/photo to save to Cloud\n• Send any message to chat in Burmese.",
                     parse_mode="HTML"
                 )
             except Exception as e:
