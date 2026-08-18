@@ -46,22 +46,26 @@ echo "----------------------------------------------------------------------"
 read -p "🔑 Enter Cloud Master Password [default: admin123]: " INPUT_PASSWORD
 ADMIN_PASSWORD=${INPUT_PASSWORD:-admin123}
 
-# 2. Telegram Bot Token
+# 2. Cloud Web Port
+read -p "🔌 Enter Cloud Web Port [default: 8090]: " INPUT_PORT
+CLOUD_PORT=${INPUT_PORT:-8090}
+
+# 3. Telegram Bot Token
 echo ""
 echo -e "${CYAN}🤖 Telegram Bot Setup (from @BotFather):${NC}"
 read -p "👉 Enter Telegram Bot Token (or press Enter to skip for now): " TG_BOT_TOKEN
 
-# 3. Telegram Admin Chat ID
+# 4. Telegram Admin Chat ID
 echo ""
 echo -e "${CYAN}👤 Telegram Admin Numeric ID (from @userinfobot):${NC}"
 read -p "👉 Enter Your Telegram Chat ID: " TG_CHAT_ID
 
-# 4. Google Gemini API Key
+# 5. Google Gemini API Key
 echo ""
 echo -e "${CYAN}🧠 Google Gemini AI Key (Free from https://aistudio.google.com/app/apikey):${NC}"
 read -p "👉 Enter Gemini API Key (or press Enter to skip for now): " GEMINI_KEY
 
-# 5. Optional Domain Name
+# 6. Optional Domain Name
 echo ""
 echo -e "${CYAN}🌐 Domain Name (Optional for HTTPS/SSL, e.g. cloud.yourdomain.com):${NC}"
 read -p "👉 Enter Domain Name (leave blank to use VPS IP): " DOMAIN_NAME
@@ -81,26 +85,29 @@ systemctl enable --now docker
 echo -e "${BLUE}🛡️ [2/6] Configuring UFW Firewall & Cyber Shield...${NC}"
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow 22/tcp      # SSH
-ufw allow 80/tcp      # HTTP
-ufw allow 443/tcp     # HTTPS
-ufw allow 3000/tcp    # S-Tech Cloud
-ufw allow 51820/udp   # WireGuard VPN (if used)
+ufw allow 22/tcp          # SSH
+ufw allow 80/tcp          # HTTP
+ufw allow 443/tcp         # HTTPS
+ufw allow ${CLOUD_PORT}/tcp # S-Tech Cloud Custom Port
+ufw allow 51820/udp       # WireGuard VPN (if used)
 echo "y" | ufw enable || true
 
 # Step 3: Configure S-Tech Cloud Environment
-echo -e "${BLUE}☁️ [3/6] Setting up S-Tech Cloud Storage...${NC}"
+echo -e "${BLUE}☁️ [3/6] Setting up S-Tech Cloud Storage on Port ${CLOUD_PORT}...${NC}"
 mkdir -p "$PROJECT_DIR/storage" "$PROJECT_DIR/data/trash" "$PROJECT_DIR/storage/Telegram_Uploads"
 
 JWT_SECRET=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
 
 cat <<EOF > "$PROJECT_DIR/.env"
-PORT=3000
+PORT=$CLOUD_PORT
 ADMIN_PASSWORD=$ADMIN_PASSWORD
 JWT_SECRET=$JWT_SECRET
 EOF
 
-# Build & Launch S-Tech Cloud Container (prefer Go-based 'docker compose')
+# Stop previous container if exists
+docker rm -f personal-cloud-app 2>/dev/null || true
+
+# Build & Launch S-Tech Cloud Container
 echo -e "${BLUE}🐳 [4/6] Launching S-Tech Cloud Docker Container...${NC}"
 if docker compose version >/dev/null 2>&1; then
     docker compose up -d --build
@@ -173,7 +180,7 @@ server {
     client_max_body_size 10G;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:$CLOUD_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -199,9 +206,10 @@ echo "======================================================================"
 if [ -n "$DOMAIN_NAME" ]; then
     echo -e "🌐 ${CYAN}Cloud URL:${NC}           https://$DOMAIN_NAME"
 else
-    echo -e "🌐 ${CYAN}Cloud URL:${NC}           http://$PUBLIC_IP:3000"
+    echo -e "🌐 ${CYAN}Cloud URL:${NC}           http://$PUBLIC_IP:$CLOUD_PORT"
 fi
 echo -e "🔑 ${CYAN}Master Password:${NC}     $ADMIN_PASSWORD"
+echo -e "🔌 ${CYAN}Running on Port:${NC}     $CLOUD_PORT"
 echo -e "🛡️ ${CYAN}Cyber Shield:${NC}        UFW Firewall & SSH Auto-Ban ACTIVE"
 echo -e "🤖 ${CYAN}AI DevOps Agent:${NC}     $(systemctl is-active stech-agent.service)"
 echo "----------------------------------------------------------------------"

@@ -6,12 +6,11 @@ services:
     container_name: personal-cloud-app
     restart: always
     ports:
-      - "3000:3000"
+      - "${PORT:-8090}:${PORT:-8090}"
     environment:
-      - PORT=3000
-      - ADMIN_PASSWORD=admin123   # Change this to your preferred master password
-      - JWT_SECRET=change-this-jwt-secret-key-for-security-2026
+      - PORT=${PORT:-8090}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - JWT_SECRET=${JWT_SECRET:-change-this-jwt-secret-key-for-security-2026}
     volumes:
-      # Persistent storage on host machine
       - ./storage:/app/storage
       - ./data:/app/data

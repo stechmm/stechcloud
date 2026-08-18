@@ -12,7 +12,7 @@ const bcrypt = require('bcryptjs');
 const db = require('./db');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8090;
 const JWT_SECRET = process.env.JWT_SECRET || 'personal-cloud-super-secret-key-2026';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const STORAGE_ROOT = path.resolve(process.env.STORAGE_DIR || path.join(__dirname, 'storage'));
