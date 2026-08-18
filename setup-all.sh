@@ -74,10 +74,10 @@ echo "----------------------------------------------------------------------"
 echo -e "${GREEN}⏳ Starting All-in-One Installation...${NC}"
 echo "----------------------------------------------------------------------"
 
-# Step 1: Update System & Install Core Tools (including modern Docker compose plugin)
+# Step 1: Update System & Install Core Tools
 echo -e "${BLUE}📦 [1/6] Updating Ubuntu packages & installing dependencies...${NC}"
 apt update
-apt install -y docker.io docker-compose-plugin docker-compose python3 python3-pip python3-venv curl git ufw udev
+apt install -y docker.io python3 python3-pip python3-venv curl git ufw udev
 
 systemctl enable --now docker
 
@@ -93,7 +93,7 @@ ufw allow 51820/udp       # WireGuard VPN (if used)
 echo "y" | ufw enable || true
 
 # Step 3: Configure S-Tech Cloud Environment
-echo -e "${BLUE}☁️ [3/6] Setting up S-Tech Cloud Storage on Port ${CLOUD_PORT}...${NC}"
+echo -e "${BLUE}☁️ [3/6] Setting up S-Tech Cloud Storage directories...${NC}"
 mkdir -p "$PROJECT_DIR/storage" "$PROJECT_DIR/data/trash" "$PROJECT_DIR/storage/Telegram_Uploads"
 
 JWT_SECRET=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
@@ -104,16 +104,21 @@ ADMIN_PASSWORD=$ADMIN_PASSWORD
 JWT_SECRET=$JWT_SECRET
 EOF
 
-# Stop previous container if exists
+# Build & Launch S-Tech Cloud Container directly via native Docker engine
+echo -e "${BLUE}🐳 [4/6] Building and Launching S-Tech Cloud Container...${NC}"
+docker build -t stechcloud_personal-cloud:latest "$PROJECT_DIR"
 docker rm -f personal-cloud-app 2>/dev/null || true
 
-# Build & Launch S-Tech Cloud Container
-echo -e "${BLUE}🐳 [4/6] Launching S-Tech Cloud Docker Container...${NC}"
-if docker compose version >/dev/null 2>&1; then
-    docker compose up -d --build
-else
-    docker-compose up -d --build
-fi
+docker run -d \
+  --name personal-cloud-app \
+  --restart always \
+  -p "${CLOUD_PORT}:${CLOUD_PORT}" \
+  -e PORT="${CLOUD_PORT}" \
+  -e ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+  -e JWT_SECRET="${JWT_SECRET}" \
+  -v "$PROJECT_DIR/storage:/app/storage" \
+  -v "$PROJECT_DIR/data:/app/data" \
+  stechcloud_personal-cloud:latest
 
 # Step 4: Setup S-Tech AI DevOps Agent
 echo -e "${BLUE}🤖 [5/6] Setting up AI DevOps & Cyber Defense Agent...${NC}"
