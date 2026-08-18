@@ -77,7 +77,7 @@ echo "----------------------------------------------------------------------"
 # Step 1: Update System & Install Core Tools
 echo -e "${BLUE}📦 [1/6] Updating Ubuntu packages & installing dependencies...${NC}"
 apt update
-apt install -y docker.io python3 python3-pip python3-venv curl git ufw udev
+apt install -y docker.io python3 python3-pip python3-venv curl git ufw udev dos2unix
 
 systemctl enable --now docker
 
